@@ -135,15 +135,30 @@ def acs():
     relay_state = request.form.get('RelayState')
     redirect_target = toolkit.url_for(
         str(relay_state), _external=True) if relay_state else u'user.me'
-
+    
     resp = toolkit.redirect_to(redirect_target)
 
-    # log the user in programmatically
-    set_repoze_user(g.user, resp)
-    log.debug('User {} OK, redirecting'.format(g.user))
+    """ Log the user into different CKAN versions.
+
+    CKAN 2.10 introduces flask-login and login_user method.
+
+    CKAN 2.9.6 added a security change and identifies the user
+    with the internal id plus a serial autoincrement (currently static).
+
+    CKAN <= 2.9.5 identifies the user only using the internal id.
+    """
+    if toolkit.check_ckan_version(min_version="2.10"):
+        from ckan.common import login_user
+        login_user(g.userobj)
+        return
+
+    if toolkit.check_ckan_version(min_version="2.9.6"):
+        user_id = "{},1".format(g.userobj.id)
+    else:
+        user_id = g.userobj.name
+    set_repoze_user(user_id, resp)
 
     return resp
-
 
 def get_requested_authn_contexts():
     requested_authn_contexts = config.get('ckanext.saml2auth.requested_authn_context', None)
@@ -175,7 +190,6 @@ def saml2login():
         reqid, info = client.prepare_for_authenticate(requested_authn_context=final_context, relay_state=relay_state)
     else:
         reqid, info = client.prepare_for_authenticate(relay_state=relay_state)
-
     redirect_url = None
     for key, value in info[u'headers']:
         if key == u'Location':
